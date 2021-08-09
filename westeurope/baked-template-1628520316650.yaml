@@ -1,0 +1,186 @@
+---
+# Source: reviewer/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: reviewer-api
+  namespace: app-dev-arc
+  labels:
+    app: reviewer-api
+spec:
+  type: ClusterIP
+  selector:
+    app: reviewer-api
+  ports:
+  - name: http
+    port: 80
+    protocol: TCP
+    targetPort: 5000
+---
+# Source: reviewer/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: reviewer-ui
+  namespace: app-dev-arc
+  labels:
+    app: reviewer-ui
+spec:
+  type: ClusterIP
+  selector:
+    app: reviewer-ui
+  ports:
+  - name: http
+    port: 80
+    protocol: TCP
+    targetPort: 3000
+---
+# Source: reviewer/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: reviewer-api
+  namespace: app-dev-arc
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: reviewer-api
+  template:
+    metadata:
+      labels:
+        app: reviewer-api
+        aadpodidbinding: reviewer-api-label
+    spec:
+      containers:
+      - name: reviewer-api
+        image: ghcr.io/jasoncabot-ms/reviewer/api:v1.5
+        ports:
+        - containerPort: 5000
+        env:
+        - name: "ASPNETCORE_ENVIRONMENT"
+          value: "Production"
+        - name: "ASPNETCORE_FORWARDEDHEADERS_ENABLED"
+          value: "true"
+        - name: "AllowedOrigin"
+          value: "https://arc-k3s-demo-ckct76ewzj45e.westeurope.cloudapp.azure.com/"
+        - name: "Authorization.Authority"
+          value: "https://login.microsoftonline.com/common/"
+        - name: "Authorization.Audience"
+          value: "c55969a5-e35b-4e39-af71-ba455a837a65"
+        - name: "Storage__serviceUri"
+          value: "https://4zoednqz36wso.blob.core.windows.net/"
+        - name: "ConnectionStrings__SQLDBConnectionString"
+          value: "Server=tcp:hi3yx7wveeu5k.database.windows.net,1433;Database=sqldb-reviewer;"
+---
+# Source: reviewer/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: reviewer-ui
+  namespace: app-dev-arc
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: reviewer-ui
+  template:
+    metadata:
+      labels:
+        app: reviewer-ui
+        aadpodidbinding: reviewer-ui-label
+    spec:
+      containers:
+      - name: reviewer-ui
+        image: ghcr.io/jasoncabot-ms/reviewer/ui:v1.5
+        ports:
+        - containerPort: 3000
+        env:
+        - name: "API_ENDPOINT"
+          value: "https://arc-k3s-demo-ckct76ewzj45e.westeurope.cloudapp.azure.com/api"
+        - name: "CLIENT_ID"
+          value: "c55969a5-e35b-4e39-af71-ba455a837a65"
+        - name: "AUTHORITY"
+          value: "https://login.microsoftonline.com/common"
+        - name: "SCOPE"
+          value: "api://c55969a5-e35b-4e39-af71-ba455a837a65/user_impersonation"
+---
+# Source: reviewer/templates/ingress.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: reviewer
+  namespace: app-dev-arc
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    kubernetes.io/ingress.class: traefik
+    ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  tls:
+  - hosts:
+    - arc-k3s-demo-ckct76ewzj45e.westeurope.cloudapp.azure.com
+    secretName: reviewer-key
+  rules:
+  - host: arc-k3s-demo-ckct76ewzj45e.westeurope.cloudapp.azure.com
+    http:
+      paths:
+      - path: /api
+        pathType: Prefix
+        backend:
+          service:
+            name: reviewer-api
+            port:
+              number: 80
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: reviewer-ui
+            port:
+              number: 80
+---
+# Source: reviewer/templates/azure-identity.yaml
+apiVersion: "aadpodidentity.k8s.io/v1"
+kind: AzureIdentity
+metadata:
+  annotations:
+    aadpodidentity.k8s.io/Behavior: namespaced 
+  name: reviewer-api-identity
+  namespace: app-dev-arc
+spec:
+  type: 0 # MSI
+  resourceID: /subscriptions/012f1462-c8ff-4ca5-be75-9a6360ab645d/resourceGroups/arc4k8s-westeurope/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-api-4vrvf5zoffuo4
+  clientID: 6ce8a178-33d9-4263-a960-530fed2935f0
+---
+# Source: reviewer/templates/azure-identity.yaml
+apiVersion: "aadpodidentity.k8s.io/v1"
+kind: AzureIdentity
+metadata:
+  annotations:
+    aadpodidentity.k8s.io/Behavior: namespaced 
+  name: reviewer-ui-identity
+  namespace: app-dev-arc
+spec:
+  type: 0 # MSI
+  resourceID: /subscriptions/012f1462-c8ff-4ca5-be75-9a6360ab645d/resourceGroups/arc4k8s-westeurope/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-ui-4vrvf5zoffuo4
+  clientID: 355720ee-2def-4b2c-908b-2c5a851e60ae
+---
+# Source: reviewer/templates/azure-identity-binding.yaml
+apiVersion: "aadpodidentity.k8s.io/v1"
+kind: AzureIdentityBinding
+metadata:
+  name: reviewer-api-binding
+  namespace: app-dev-arc
+spec:
+  azureIdentity: reviewer-api-identity
+  selector: reviewer-api-label
+---
+# Source: reviewer/templates/azure-identity-binding.yaml
+apiVersion: "aadpodidentity.k8s.io/v1"
+kind: AzureIdentityBinding
+metadata:
+  name: reviewer-ui-binding
+  namespace: app-dev-arc
+spec:
+  azureIdentity: reviewer-ui-identity
+  selector: reviewer-ui-label
